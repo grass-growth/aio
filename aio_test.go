@@ -3,6 +3,8 @@ package aio
 import (
 	"crypto/rand"
 	"fmt"
+	"github.com/djherbis/buffer"
+	"github.com/djherbis/nio/v3"
 	"io"
 	"os"
 	"path/filepath"
@@ -11,7 +13,7 @@ import (
 	"time"
 )
 
-func bechmarkWithSizes(b *testing.B, fn func(*testing.B, []byte)) {
+func benchmarkWithSizes(b *testing.B, fn func(*testing.B, []byte)) {
 	sizes := []int{128, 256, 512, 1024, 2048, 4096, 8192}
 	for _, size := range sizes {
 		buf := make([]byte, size)
@@ -41,7 +43,7 @@ func createOut(b *testing.B) io.Writer {
 }
 
 func BenchmarkIOPipe(b *testing.B) {
-	bechmarkWithSizes(b, func(sb *testing.B, buf []byte) {
+	benchmarkWithSizes(b, func(sb *testing.B, buf []byte) {
 		out := createOut(sb)
 
 		pr, pw := io.Pipe()
@@ -67,7 +69,7 @@ func BenchmarkIOPipe(b *testing.B) {
 }
 
 func BenchmarkIOPipeWithTimeout(b *testing.B) {
-	bechmarkWithSizes(b, func(sb *testing.B, buf []byte) {
+	benchmarkWithSizes(b, func(sb *testing.B, buf []byte) {
 		out := createOut(sb)
 
 		pr, pw := io.Pipe()
@@ -111,7 +113,7 @@ func BenchmarkIOPipeWithTimeout(b *testing.B) {
 }
 
 func BenchmarkNoPipe(b *testing.B) {
-	bechmarkWithSizes(b, func(sb *testing.B, buf []byte) {
+	benchmarkWithSizes(b, func(sb *testing.B, buf []byte) {
 		out := createOut(sb)
 
 		sb.ResetTimer()
@@ -121,5 +123,77 @@ func BenchmarkNoPipe(b *testing.B) {
 				sb.Fatal(err)
 			}
 		}
+	})
+}
+
+func BenchmarkNioPipe(b *testing.B) {
+	benchmarkWithSizes(b, func(sb *testing.B, buf []byte) {
+		out := createOut(sb)
+
+		pbuf := buffer.New(32 * 1024) // 32KB In memory Buffer
+		pr, pw := nio.Pipe(pbuf)
+		donech := make(chan struct{})
+
+		go func() {
+			defer close(donech)
+			io.Copy(out, pr)
+		}()
+
+		sb.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_, err := pw.Write(buf)
+			if err != nil {
+				sb.Fatal(err)
+			}
+		}
+
+		pw.Close()
+		<-donech
+		pr.Close()
+	})
+}
+
+func BenchmarkNioPipeWithTimeout(b *testing.B) {
+	benchmarkWithSizes(b, func(sb *testing.B, buf []byte) {
+		out := createOut(sb)
+
+		pbuf := buffer.New(32 * 1024) // 32KB In memory Buffer
+		pr, pw := nio.Pipe(pbuf)
+		donech := make(chan struct{})
+
+		go func() {
+			defer close(donech)
+			var buf [4096]byte
+
+			for {
+				n, err := pr.Read(buf[:])
+				if n > 0 {
+					out.Write(buf[:n])
+				}
+
+				if err == io.EOF {
+					break
+				}
+
+				if err != nil {
+					b.Logf("Failed to read: %v", err)
+					return
+				}
+
+				time.Sleep(1 * time.Microsecond)
+			}
+		}()
+
+		sb.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_, err := pw.Write(buf)
+			if err != nil {
+				sb.Fatal(err)
+			}
+		}
+
+		pw.Close()
+		<-donech
+		pr.Close()
 	})
 }
