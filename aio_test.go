@@ -3,14 +3,15 @@ package aio
 import (
 	"crypto/rand"
 	"fmt"
-	"github.com/djherbis/buffer"
-	"github.com/djherbis/nio/v3"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/djherbis/buffer"
+	"github.com/djherbis/nio/v3"
 )
 
 func benchmarkWithSizes(b *testing.B, fn func(*testing.B, []byte)) {
