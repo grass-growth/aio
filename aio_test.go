@@ -1,44 +1,66 @@
 package aio
 
 import (
+	"crypto/rand"
+	"fmt"
 	"io"
 	"os"
-	"sync"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
-var testData = []byte("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz")
+func bechmarkWithSizes(b *testing.B, fn func(*testing.B, []byte)) {
+	sizes := []int{128, 256, 512, 1024, 2048, 4096, 8192}
+	for _, size := range sizes {
+		buf := make([]byte, size)
+		rand.Read(buf)
 
-func BenchmarkWrite(b *testing.B) {
-	// Create a pipe
-	pr, pw := io.Pipe()
+		b.Run(fmt.Sprint(size), func(sb *testing.B) {
+			fn(sb, buf)
+		})
+	}
+}
 
-	// Create a buffer with text data
+func createOut(b *testing.B) io.Writer {
+	b.Helper()
 
-	var wg sync.WaitGroup
-
-	// Read from the read end concurrently
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		_, err := io.Copy(os.Stdout, pr)
-		if err != nil {
-			panic(err)
-		}
-	}()
-
-	// Run the Write function b.N times
-	for i := 0; i < b.N; i++ {
-		_, err := pw.Write(testData)
-		if err != nil {
-			b.Fatal(err)
-		}
+	filename := filepath.Join(b.TempDir(), strings.ReplaceAll(b.Name(), "/", "_"))
+	f, err := os.Create(filename)
+	if err != nil {
+		b.Fatalf("Failed to create file: %v", err)
 	}
 
-	// Close the write end of the pipe
-	pw.Close()
+	b.Cleanup(func() {
+		f.Close()
+		os.Remove(filename)
+	})
 
-	wg.Wait()
-	// Close the read end of the pipe
-	pr.Close()
+	return f
+}
+
+func BenchmarkIOPipe(b *testing.B) {
+	bechmarkWithSizes(b, func(sb *testing.B, buf []byte) {
+		out := createOut(sb)
+
+		pr, pw := io.Pipe()
+		donech := make(chan struct{})
+
+		go func() {
+			defer close(donech)
+			io.Copy(out, pr)
+		}()
+
+		sb.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_, err := pw.Write(buf)
+			if err != nil {
+				sb.Fatal(err)
+			}
+		}
+
+		pw.Close()
+		<-donech
+		pr.Close()
+	})
 }
