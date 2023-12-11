@@ -64,3 +64,17 @@ func BenchmarkIOPipe(b *testing.B) {
 		pr.Close()
 	})
 }
+
+func BenchmarkNoPipe(b *testing.B) {
+	bechmarkWithSizes(b, func(sb *testing.B, buf []byte) {
+		out := createOut(sb)
+
+		sb.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_, err := out.Write(buf)
+			if err != nil {
+				sb.Fatal(err)
+			}
+		}
+	})
+}
