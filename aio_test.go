@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func bechmarkWithSizes(b *testing.B, fn func(*testing.B, []byte)) {
@@ -49,6 +50,50 @@ func BenchmarkIOPipe(b *testing.B) {
 		go func() {
 			defer close(donech)
 			io.Copy(out, pr)
+		}()
+
+		sb.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_, err := pw.Write(buf)
+			if err != nil {
+				sb.Fatal(err)
+			}
+		}
+
+		pw.Close()
+		<-donech
+		pr.Close()
+	})
+}
+
+func BenchmarkIOPipeWithTimeout(b *testing.B) {
+	bechmarkWithSizes(b, func(sb *testing.B, buf []byte) {
+		out := createOut(sb)
+
+		pr, pw := io.Pipe()
+		donech := make(chan struct{})
+
+		go func() {
+			defer close(donech)
+			var buf [4096]byte
+
+			for {
+				n, err := pr.Read(buf[:])
+				if n > 0 {
+					out.Write(buf[:n])
+				}
+
+				if err == io.EOF {
+					break
+				}
+
+				if err != nil {
+					b.Logf("Failed to read: %v", err)
+					return
+				}
+
+				time.Sleep(1 * time.Microsecond)
+			}
 		}()
 
 		sb.ResetTimer()
